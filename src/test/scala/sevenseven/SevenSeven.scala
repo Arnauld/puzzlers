@@ -15,11 +15,11 @@ class SevenSevenSpecs extends Specification {
     }
 
     "provide a way to obtain all combinaisons" in {
-      val empty = Map[Int,List[String]]()
+      val empty = Map[Int,List[Formula]]()
       val solutions = allTrees(6).foldLeft(empty) { (collected,tree) =>
         val nodes = tree.traverse( nodeCollector, List[Node]())
-        nodes.size mustVerify (_ > 2)
-        recursivelyChangeOperator(tree, 0, nodes, mapCollector, collected)
+        val initialCtx = NodeContext(Map())
+        recursivelyChangeOperator(tree, initialCtx, 0, nodes, evalCollector, collected)
       }
 
       solutions.keySet.toList.sorted.foreach {
@@ -27,20 +27,34 @@ class SevenSevenSpecs extends Specification {
           val formulae = solutions(key)
           println (key + " <~~ " + formulae(0) + (if(formulae.size>1) "..."+(formulae.size-1)+" more" else ""))
       }
+
+      solutions.size mustVerify (_ > 2)
     }
   }
+}
+
+case class Formula(tree:TreeItem, ctx:NodeContext) {
+  override def toString = tree.toString(ctx)
 }
 
 object SevenSeven {
   val C7 = Const(7)
 
-  def mapCollector = (tree:TreeItem, collected:Map[Int,List[String]]) => {
-    val asInt = Math.abs(tree.eval).toInt
-    collected + (asInt -> (collected.get(asInt) match {
-      case None => List(tree.toString)
-      case Some(list) => tree.toString :: list
-    }))
+  def evalCollector = (tree:TreeItem, ctx:NodeContext, collected:Map[Int,List[Formula]]) => {
+    tree.eval(ctx) match {
+      case value if(isSuitable(value)) =>
+        val asInt = Math.abs(value).toInt
+        val formula = Formula(tree, ctx)
+        multiMapPut(collected , asInt, formula)
+      case _ =>
+        collected
+    }
   }
+
+  def multiMapPut[K,V](map:Map[K,List[V]], key:K, value:V) = map + (key -> (map.get(key) match {
+    case None => List(value)
+    case Some(list) => value :: list
+  }))
 
   def nodeCollector = (item:TreeItem, collected:List[Node]) =>
     if(item.isInstanceOf[Node])
@@ -56,24 +70,30 @@ object SevenSeven {
       i <- 0 until size;
       left <- allTrees(i);
       right <- allTrees(size-i-1)
-    ) yield new Node(left,right, Op.ADD).asInstanceOf[TreeItem]
+    ) yield new Node(left,right).asInstanceOf[TreeItem]
     ).toList
   }
 
   def isSuitable(d:Double) = Math.abs(d-d.toInt)<1e-6
 
-  def recursivelyChangeOperator[T](tree:TreeItem, index:Int, treeNodes:List[Node], callback:(TreeItem,T)=>T, arg:T):T =
+  def recursivelyChangeOperator[T](
+          tree:TreeItem,
+          /* evaluation context */
+          ctx:NodeContext,
+          /* recursive data */
+          index:Int, treeNodes:List[Node],
+          /* foldLeft alike */
+          callback:(TreeItem, NodeContext, T)=>T, arg:T):T =
     index match {
       case x if(x==treeNodes.size) =>
-        isSuitable(tree.eval) match {
-          case true => callback(tree, arg)
+        isSuitable(tree.eval(ctx)) match {
+          case true => callback(tree, ctx, arg)
           case false => arg
         }
       case _ =>
         Op.ALL.foldLeft(arg) { (collected, op) =>
-          // the only? mutable part... must find a smart way to clone the tree
-          treeNodes(index).operator = op
-          recursivelyChangeOperator(tree, index+1, treeNodes, callback, collected)
+          val nextCtx = ctx.changeOperator(treeNodes(index), op)
+          recursivelyChangeOperator(tree, nextCtx, index+1, treeNodes, callback, collected)
         }
     }
 }
@@ -82,19 +102,27 @@ object SevenSeven {
 /*
  *  ~~~~~~   Node   ~~~~~~
  */
+case class NodeContext(operatorMap:Map[Node,Operator]) {
+  def operatorFor(node:Node):Operator = operatorMap.get(node) match {
+    case None => Op.ADD // rely on Add by default
+    case Some(op) => op
+  }
+  def changeOperator(node:Node, op:Operator):NodeContext = NodeContext(operatorMap + (node->op))
+}
 
 trait TreeItem {
-  def eval:Double
+  def eval(ctx:NodeContext):Double
+  def toString(ctx:NodeContext):String = toString
   def traverse[T](visitor:(TreeItem,T)=>T, arg:T):T = visitor(this,arg)
 }
 
 case class Const(value:Int) extends TreeItem {
-  def eval = value.asInstanceOf[Double]
+  def eval(ctx:NodeContext) = value.asInstanceOf[Double]
 
   override def toString = "_"+value
 }
 
-class Node(val left:TreeItem, val right:TreeItem, var operator:Operator) extends TreeItem {
+class Node(val left:TreeItem, val right:TreeItem) extends TreeItem {
 
   override def traverse[T](visitor: (TreeItem,T)=>T, arg:T):T = {
     val argLeft = left.traverse(visitor, arg)
@@ -102,9 +130,10 @@ class Node(val left:TreeItem, val right:TreeItem, var operator:Operator) extends
     right.traverse(visitor, argNode)
   }
 
-  def eval = operator.eval(left.eval, right.eval)
+  def eval(ctx:NodeContext) = ctx.operatorFor(this).eval(left.eval(ctx), right.eval(ctx))
 
-  override def toString = "("+left+operator+right+")"
+  override def toString = "("+left+ " # " +right+")"
+  override def toString(ctx:NodeContext) = "("+left.toString(ctx)+ ctx.operatorFor(this) +right.toString(ctx)+")"
 }
 
 /*
