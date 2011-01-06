@@ -104,35 +104,3 @@ class SevenSevenSpecs extends Specification {
     }
   }
 }
-
-
-
-
-
-
-/*
- *  ~~~~~~   Node   ~~~~~~
- */
-
-
-
-
-
-
-
-
-/*
- *  ~~~~~~   Operator   ~~~~~~
- */
-
-
-
-
-
-
-
-/*
- *  ~~~~~~   Actor   ~~~~~~
- */
-
-
