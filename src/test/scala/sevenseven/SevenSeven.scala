@@ -1,44 +1,29 @@
 package sevenseven
 
-import org.specs.Specification
-
-class SevenSevenSpecs extends Specification {
-
-  import SevenSeven._
-
-  "SevenSeven" should {
-
-    "provide a way to obtain all trees" in {
-      val trees = allTrees(6)
-      trees.size mustVerify (_ > 2)
-      trees.foreach { t => println(t) }
-    }
-
-    "provide a way to obtain all combinaisons" in {
-      val empty = Map[Int,List[Formula]]()
-      val solutions = allTrees(6).foldLeft(empty) { (collected,tree) =>
-        val nodes = tree.traverse( nodeCollector, List[Node]())
-        val initialCtx = NodeContext(Map())
-        recursivelyChangeOperator(tree, initialCtx, 0, nodes, evalCollector, collected)
-      }
-
-      solutions.keySet.toList.sorted.foreach {
-        key =>
-          val formulae = solutions(key)
-          println (key + " <~~ " + formulae(0) + (if(formulae.size>1) "..."+(formulae.size-1)+" more" else ""))
-      }
-
-      solutions.size mustVerify (_ > 2)
-    }
-  }
-}
-
+import actors.Actor
 case class Formula(tree:TreeItem, ctx:NodeContext) {
   override def toString = tree.toString(ctx)
+  def eval:Int = tree.eval(ctx).toInt
+  def evalPositive:Int = Math.abs(eval)
 }
 
 object SevenSeven {
   val C7 = Const(7)
+  val EmptyMap = Map[Int,List[Formula]]()
+
+  def calculateSolutions = allTrees(6).foldLeft(EmptyMap) { (collected,tree) =>
+    val nodes = tree.traverse( nodeCollector, List[Node]())
+    val initialCtx = NodeContext(Map())
+    recursivelyChangeOperator(tree, initialCtx, 0, nodes, evalCollector, collected)
+  }
+
+  def evalCollectorActor = (tree:TreeItem, ctx:NodeContext, collector:Actor) => {
+    tree.eval(ctx) match {
+      case value if(isSuitable(value)) => collector!Formula(tree, ctx)
+      case _ => // no-op
+    }
+    collector
+  }
 
   def evalCollector = (tree:TreeItem, ctx:NodeContext, collected:Map[Int,List[Formula]]) => {
     tree.eval(ctx) match {
